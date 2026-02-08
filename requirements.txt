@@ -1,0 +1,8 @@
+torch
+gymnasium
+pandas
+numpy
+yfinance
+ta
+matplotlib
+scikit-learn
