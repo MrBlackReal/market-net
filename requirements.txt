@@ -6,3 +6,6 @@ yfinance
 ta
 matplotlib
 scikit-learn
+optuna
+ccxt
+tensorboard
