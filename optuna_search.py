@@ -3,6 +3,7 @@ import torch
 from src.data import fetch_data, add_indicators, preprocess_data
 from src.env import TradingEnv
 from src.model import DQNAgent, QNetwork
+from src.model_pc import DQNAgentPC, QNetworkPC
 from src.train import evaluate_agent
 from datetime import datetime, timedelta
 import numpy as np
@@ -14,6 +15,11 @@ def objective(trial):
     hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     epsilon_decay = trial.suggest_float("epsilon_decay", 0.99, 0.999)
+    model_type = trial.suggest_categorical("model_type", ["standard", "pc"])
+    
+    pred_alpha = 0.5
+    if model_type == "pc":
+        pred_alpha = trial.suggest_float("pred_alpha", 0.1, 1.0)
 
     # Simplified training for optimization (shorter window, fewer episodes)
     symbol = "AAPL"
@@ -37,11 +43,19 @@ def objective(trial):
     state_size = train_scaled.shape[1] + 3
     action_size = train_env.action_space.n
     
-    # Custom agent with trial params
-    agent = DQNAgent(state_size, action_size, lr=lr, gamma=gamma, epsilon_decay=epsilon_decay, memory_size=1000)
-    # Override hidden_dim
-    agent.model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
-    agent.target_model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
+    # Initialize correct agent type
+    if model_type == "pc":
+        agent = DQNAgentPC(state_size, action_size, lr=lr, gamma=gamma, epsilon_decay=epsilon_decay, memory_size=1000)
+        agent.pred_alpha = pred_alpha
+        # Override hidden_dim for trial
+        agent.model = QNetworkPC(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
+        agent.target_model = QNetworkPC(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
+    else:
+        agent = DQNAgent(state_size, action_size, lr=lr, gamma=gamma, epsilon_decay=epsilon_decay, memory_size=1000)
+        # Override hidden_dim for trial
+        agent.model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
+        agent.target_model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
+
     agent.update_target_network()
     agent.optimizer = torch.optim.Adam(agent.model.parameters(), lr=lr)
 
@@ -64,6 +78,6 @@ def objective(trial):
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=30) # Increased trials since we added a categorical param
 
     print("Best hyperparameters:", study.best_params)

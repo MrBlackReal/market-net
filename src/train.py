@@ -3,13 +3,14 @@ import torch
 from src.data import fetch_data, add_indicators, preprocess_data
 from src.env import TradingEnv
 from src.model import DQNAgent
-
+from src.model_pc import DQNAgentPC
 from datetime import datetime, timedelta
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import os
+import numpy as np
 
-def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance"):
+def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance", model_type="standard"):
     # 1. Fetch and process data (10 year window)
     today = datetime(2026, 2, 8)
     start_date = (today - timedelta(days=365*10)).strftime("%Y-%m-%d")
@@ -26,7 +27,6 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance"):
     val_df = full_df[full_df.index >= val_split_date]
     
     train_scaled, features, scaler = preprocess_data(train_df)
-    # Use the SAME scaler for validation data to avoid data leakage
     val_scaled = scaler.transform(val_df[features].values)
     
     # 2. Setup environment and agent
@@ -35,10 +35,17 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance"):
     
     state_size = train_scaled.shape[1] + 3
     action_size = train_env.action_space.n
-    agent = DQNAgent(state_size, action_size)
+    
+    if model_type == "pc":
+        print("Using Predictive Coding (PC) Agent.")
+        agent = DQNAgentPC(state_size, action_size)
+    else:
+        print("Using Standard D3QN Agent.")
+        agent = DQNAgent(state_size, action_size)
     
     # TensorBoard setup
-    writer = SummaryWriter(f"runs/{symbol}_{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    writer = SummaryWriter(f"runs/{symbol}_{model_type}_{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+
     
     best_val_worth = 0
     patience = 10
@@ -50,6 +57,7 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance"):
         state, _ = train_env.reset()
         total_reward = 0
         losses = []
+        pred_losses = []
         
         for time in range(len(train_df) - 31):
             action = agent.act(state)
@@ -58,22 +66,34 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance"):
             state = next_state
             total_reward += reward
             
-            if len(agent.memory) > batch_size:
-                loss = agent.replay(batch_size)
-                if loss: losses.append(loss)
+            if agent.mem_cnt > batch_size:
+                losses_batch = agent.replay(batch_size)
+                if isinstance(losses_batch, tuple):
+                    dqn_l, pred_l = losses_batch
+                    losses.append(dqn_l)
+                    pred_losses.append(pred_l)
+                else:
+                    losses.append(losses_batch)
                 
             if done: break
         
         avg_loss = np.mean(losses) if losses else 0
+        avg_pred_loss = np.mean(pred_losses) if pred_losses else 0
         agent.update_target_network()
         
         # Log training metrics
         writer.add_scalar("Train/Reward", total_reward, e)
         writer.add_scalar("Train/NetWorth", info['net_worth'], e)
         writer.add_scalar("Train/Loss", avg_loss, e)
+        if pred_losses:
+            writer.add_scalar("Train/PredLoss", avg_pred_loss, e)
         writer.add_scalar("Train/Epsilon", agent.epsilon, e)
         
-        print(f"Ep {e+1}/{episodes} | Worth: {info['net_worth']:.2f} | Loss: {avg_loss:.4f} | Eps: {agent.epsilon:.2f}")
+        loss_str = f"Loss: {avg_loss:.4f}"
+        if pred_losses:
+            loss_str += f" | PredLoss: {avg_pred_loss:.4f}"
+            
+        print(f"Ep {e+1}/{episodes} | Worth: {info['net_worth']:.2f} | {loss_str} | Eps: {agent.epsilon:.2f}")
 
         # Validation every 5 episodes
         if (e + 1) % 5 == 0:
