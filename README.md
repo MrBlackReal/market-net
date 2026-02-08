@@ -1,63 +1,75 @@
-# Market-Net: Neural Network Trading Agent
+# Market-Net: Quantum-Enhanced RL Trading Agent
 
-A Deep Reinforcement Learning (DQN) agent that learns to trade assets (Buy/Sell/Hold) using historical market data and technical indicators.
+A professional-grade Deep Reinforcement Learning (DRL) research platform that trains autonomous agents to trade assets using a blend of **Quantum Finance**, **Physics-inspired Feature Engineering**, and **Advanced RL Architectures**.
 
-## Features
-- **RL Agent:** Uses an LSTM-based Deep Q-Network to handle temporal market data.
-- **Custom Environment:** A `gymnasium` environment that simulates trading logic, fees, and portfolio management.
-- **Multiple Data Sources (Anonymous):**
-  - **Yahoo Finance**: Global stocks and crypto.
-  - **Binance**: Direct crypto data (via CCXT).
-  - **Stooq**: Global indices and stock data.
-- **Technical Indicators:** RSI, MACD, Bollinger Bands, SMA, EMA, ATR, and OBV.
+## 🚀 Advanced Features
 
-## Setup
+### 🧠 Neural Architecture
+- **Dueling Double DQN (D3QN):** Uses a Dueling architecture (splitting State Value and Action Advantage) combined with Double DQN logic to prevent Q-value overestimation and stabilize learning.
+- **LSTM Backbone:** Captures long-term temporal dependencies in market data, allowing the agent to "remember" market cycles.
+- **Optuna Integration:** Built-in Bayesian optimization for hyperparameter tuning.
 
-1. **Create and activate a virtual environment:**
+### ⚛️ Quantum & Physics Features
+- **Quantum Market Model:** Implements features derived from the **Zhang & Huang (2010)** paper, treating stock price as a wave function:
+    - **Quantum Mass:** Proxy for market inertia/market cap.
+    - **Quantum Trend:** Momentum weighted by inertia.
+    - **Quantum Uncertainty:** Real-time product of price and trend volatility to detect equilibrium shifts.
+- **Fractional Differencing:** Uses non-integer differencing (e.g., $d=0.4$) to make data stationary while preserving maximum historical memory.
+- **Correlation Signals:** Automatically fetches and correlates S&P 500 data for all stock symbols.
+
+### ⚖️ Realistic Environment
+- **Transaction Fees:** 0.1% fee per trade to penalize over-trading.
+- **Slippage Simulation:** 0.05% price slippage to model liquidity constraints.
+- **Risk-Adjusted Rewards:** Reward function penalizes drawdowns to encourage capital preservation.
+
+## 🛠 Setup
+
+1. **Initialize Environment:**
    ```bash
    python3 -m venv venv
    source venv/bin/activate
    ```
 
-2. **Install dependencies:**
+2. **Install Dependencies:**
    ```bash
    pip install -r requirements.txt
-   pip install ccxt ta requests
+   pip install ccxt ta requests tensorboard optuna
    ```
 
-## Usage
+## 📈 Usage
 
-The project is controlled via `main.py`.
-
-### 1. Training the Agent
-Train the agent on a specific symbol and data source.
-
+### 1. Hyperparameter Optimization
+Find the best settings for your specific asset before training:
 ```bash
-# Train on Apple using Yahoo Finance
-python main.py --mode train --symbol AAPL --source yfinance --episodes 50
-
-# Train on Bitcoin using Binance
-python main.py --mode train --symbol "BTC/USDT" --source binance --episodes 100
-
-# Train on S&P 500 using Stooq
-python main.py --mode train --symbol "^SPX" --source stooq --episodes 50
+python optuna_search.py
 ```
 
-### 2. Backtesting
-Evaluate a trained model on unseen data. This will generate a `backtest_result.png`.
-
+### 2. Training
+Train the agent with a 10-year historical window and real-time monitoring.
 ```bash
-python main.py --mode test --symbol AAPL --model model_AAPL.pth
+# Train on Apple (Default: yfinance)
+python main.py --mode train --symbol AAPL --episodes 100
+
+# Train on Bitcoin (Binance source)
+python main.py --mode train --symbol "BTC/USDT" --source binance --episodes 200
 ```
 
-## Configuration
-- **State Space:** Includes OHLCV data, 11 technical indicators, and portfolio status (balance, shares held).
-- **Action Space:** 0 (Hold), 1 (Buy), 2 (Sell).
-- **Hyperparameters:** Can be adjusted in `src/model.py` and `src/train.py`.
+### 3. Monitoring
+Track rewards, loss, and agent "brain" metrics in real-time:
+```bash
+tensorboard --logdir runs
+```
 
-## Project Structure
-- `main.py`: CLI entry point.
-- `src/data.py`: Data fetching and indicator logic.
-- `src/env.py`: Trading environment.
-- `src/model.py`: DQN Agent & LSTM architecture.
-- `src/train.py`: Training loop.
+### 4. Backtesting
+Evaluate performance on the most recent 2-year window (out-of-sample).
+```bash
+python main.py --mode test --symbol AAPL --model model_AAPL_best.pth
+```
+
+## 📂 Project Structure
+- `main.py`: Entry point for Train/Test modes.
+- `optuna_search.py`: Hyperparameter search script.
+- `src/data.py`: Advanced feature engineering (Quantum, FracDiff, Indicators).
+- `src/env.py`: Realistic trading environment with fees/slippage.
+- `src/model.py`: Dueling LSTM D3QN Agent.
+- `src/train.py`: Training loop with Val-split, TensorBoard, and Early Stopping.
