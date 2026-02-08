@@ -1,25 +1,26 @@
 # Market-Net: Quantum-Enhanced RL Trading Agent
 
-A professional-grade Deep Reinforcement Learning (DRL) research platform that trains autonomous agents to trade assets using a blend of **Quantum Finance**, **Physics-inspired Feature Engineering**, and **Advanced RL Architectures**.
+A professional-grade Deep Reinforcement Learning (DRL) research platform that trains autonomous agents to trade assets using a blend of **Predictive Coding**, **Quantum Finance**, and **D3QN Architectures**.
 
 ## 🚀 Advanced Features
 
 ### 🧠 Neural Architecture
-- **Dueling Double DQN (D3QN):** Uses a Dueling architecture (splitting State Value and Action Advantage) combined with Double DQN logic to prevent Q-value overestimation and stabilize learning.
-- **LSTM Backbone:** Captures long-term temporal dependencies in market data, allowing the agent to "remember" market cycles.
-- **Optuna Integration:** Built-in Bayesian optimization for hyperparameter tuning.
+- **Predictive Coding (PC) Hybrid:** (New) Implements a generative predictive head alongside the DQN. The agent learns to minimize "Market Surprise" (prediction error), allowing it to detect regime changes and anomalies faster than standard models.
+- **Dueling Double DQN (D3QN):** Splitting State Value and Action Advantage to prevent Q-value overestimation.
+- **LSTM Backbone:** Captures long-term temporal dependencies in market data.
+- **Optuna Integration:** Built-in Bayesian optimization to find the best `lr`, `gamma`, and `model_type`.
 
 ### ⚛️ Quantum & Physics Features
-- **Quantum Market Model:** Implements features derived from the **Zhang & Huang (2010)** paper, treating stock price as a wave function:
-    - **Quantum Mass:** Proxy for market inertia/market cap.
-    - **Quantum Trend:** Momentum weighted by inertia.
-    - **Quantum Uncertainty:** Real-time product of price and trend volatility to detect equilibrium shifts.
-- **Fractional Differencing:** Uses non-integer differencing (e.g., $d=0.4$) to make data stationary while preserving maximum historical memory.
-- **Correlation Signals:** Automatically fetches and correlates S&P 500 data for all stock symbols.
+- **Quantum Market Model:** Derived from **Zhang & Huang (2010)**, treating price as a wave function:
+    - **Quantum Mass:** Proxy for market inertia.
+    - **Quantum Trend:** Momentum weighted by mass.
+    - **Quantum Uncertainty:** Product of price and trend volatility.
+- **Fractional Differencing:** Uses $d=0.4$ to make data stationary while preserving historical memory.
+- **Correlation Signals:** Integration of S&P 500 (`^GSPC`) as a global market feature.
 
 ### ⚖️ Realistic Environment
-- **Transaction Fees:** 0.1% fee per trade to penalize over-trading.
-- **Slippage Simulation:** 0.05% price slippage to model liquidity constraints.
+- **Transaction Fees:** 0.1% fee per trade.
+- **Slippage Simulation:** 0.05% price slippage.
 - **Risk-Adjusted Rewards:** Reward function penalizes drawdowns to encourage capital preservation.
 
 ## 🛠 Setup
@@ -39,37 +40,49 @@ A professional-grade Deep Reinforcement Learning (DRL) research platform that tr
 ## 📈 Usage
 
 ### 1. Hyperparameter Optimization
-Find the best settings for your specific asset before training:
+Evaluate both **Standard** and **PC** models across 30+ trials:
 ```bash
 python optuna_search.py
 ```
 
 ### 2. Training
-Train the agent with a 10-year historical window and real-time monitoring.
 ```bash
-# Train on Apple (Default: yfinance)
-python main.py --mode train --symbol AAPL --episodes 100
-
-# Train on Bitcoin (Binance source)
-python main.py --mode train --symbol "BTC/USDT" --source binance --episodes 200
+# Train using the Predictive Coding Agent
+python main.py --mode train --symbol AAPL --model_type pc --episodes 100
 ```
 
 ### 3. Monitoring
-Track rewards, loss, and agent "brain" metrics in real-time:
+Track Reward, DQN Loss, and **Predictive Surprise (PredLoss)**:
 ```bash
 tensorboard --logdir runs
 ```
 
 ### 4. Backtesting
-Evaluate performance on the most recent 2-year window (out-of-sample).
 ```bash
-python main.py --mode test --symbol AAPL --model model_AAPL_best.pth
+python main.py --mode test --symbol AAPL --model_type pc --model model_AAPL_best.pth
+```
+
+## 📊 Model Outputs
+
+| Name | Description |
+|------|-------------|
+| `model_*.pth` | Trained PyTorch weights for the agent. |
+| `backtest_*.png` | Visual comparison of Agent vs. Buy & Hold strategy. |
+| `runs/` | TensorBoard event files for real-time training analytics. |
+| `best_params` | Optimal hyperparameters found via Optuna (printed to console). |
+
+## 🧪 Testing
+The project follows modular design patterns. You can run verification scripts or add unit tests for indicators:
+```bash
+# Verify data pipeline
+python src/data.py
 ```
 
 ## 📂 Project Structure
-- `main.py`: Entry point for Train/Test modes.
-- `optuna_search.py`: Hyperparameter search script.
-- `src/data.py`: Advanced feature engineering (Quantum, FracDiff, Indicators).
-- `src/env.py`: Realistic trading environment with fees/slippage.
-- `src/model.py`: Dueling LSTM D3QN Agent.
-- `src/train.py`: Training loop with Val-split, TensorBoard, and Early Stopping.
+- `main.py`: CLI entry point.
+- `optuna_search.py`: Hyperparameter optimization.
+- `src/data.py`: Feature engineering (Quantum, FracDiff, Indicators).
+- `src/env.py`: Realistic trading environment.
+- `src/model_pc.py`: Predictive Coding Hybrid Agent.
+- `src/model.py`: Standard D3QN Agent.
+- `paper.txt`: Theoretical context on Predictive Coding.
