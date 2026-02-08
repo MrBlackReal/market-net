@@ -34,14 +34,26 @@ class QNetwork(nn.Module):
         return val + (adv - adv.mean(dim=1, keepdim=True))
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
+    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, memory_size=5000):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
-        self.memory = deque(maxlen=2000)
+        
+        # High-performance NumPy Buffer
+        self.memory_size = memory_size
+        self.mem_ptr = 0
+        self.mem_cnt = 0
+        
+        # Pre-allocate memory for speed (assuming lookback=30)
+        lookback = 30
+        self.state_mem = np.zeros((memory_size, lookback, state_size), dtype=np.float32)
+        self.next_state_mem = np.zeros((memory_size, lookback, state_size), dtype=np.float32)
+        self.action_mem = np.zeros(memory_size, dtype=np.int64)
+        self.reward_mem = np.zeros(memory_size, dtype=np.float32)
+        self.done_mem = np.zeros(memory_size, dtype=np.bool_)
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = QNetwork(state_size, action_size).to(self.device)
@@ -53,29 +65,37 @@ class DQNAgent:
         self.target_model.load_state_dict(self.model.state_dict())
 
     def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+        idx = self.mem_ptr % self.memory_size
+        self.state_mem[idx] = state
+        self.next_state_mem[idx] = next_state
+        self.action_mem[idx] = action
+        self.reward_mem[idx] = reward
+        self.done_mem[idx] = done
+        self.mem_ptr += 1
+        self.mem_cnt = min(self.mem_cnt + 1, self.memory_size)
 
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
         
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            action_values = self.model(state)
+        # Use inference_mode for CPU speed boost
+        state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        with torch.inference_mode():
+            action_values = self.model(state_t)
         return torch.argmax(action_values).item()
 
     def replay(self, batch_size):
-        if len(self.memory) < batch_size:
+        if self.mem_cnt < batch_size:
             return
         
-        minibatch = random.sample(self.memory, batch_size)
-        states, actions, rewards, next_states, dones = zip(*minibatch)
+        # Fast sampling using NumPy
+        batch_indices = np.random.choice(self.mem_cnt, batch_size, replace=False)
         
-        states = torch.FloatTensor(np.array(states)).to(self.device)
-        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
-        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device)
-        next_states = torch.FloatTensor(np.array(next_states)).to(self.device)
-        dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
+        states = torch.from_numpy(self.state_mem[batch_indices]).to(self.device)
+        next_states = torch.from_numpy(self.next_state_mem[batch_indices]).to(self.device)
+        actions = torch.from_numpy(self.action_mem[batch_indices]).unsqueeze(1).to(self.device)
+        rewards = torch.from_numpy(self.reward_mem[batch_indices]).unsqueeze(1).to(self.device)
+        dones = torch.from_numpy(self.done_mem[batch_indices]).unsqueeze(1).to(self.device).float()
         
         current_q = self.model(states).gather(1, actions)
         

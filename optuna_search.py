@@ -38,7 +38,7 @@ def objective(trial):
     action_size = train_env.action_space.n
     
     # Custom agent with trial params
-    agent = DQNAgent(state_size, action_size, lr=lr, gamma=gamma, epsilon_decay=epsilon_decay)
+    agent = DQNAgent(state_size, action_size, lr=lr, gamma=gamma, epsilon_decay=epsilon_decay, memory_size=1000)
     # Override hidden_dim
     agent.model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)
     agent.target_model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(agent.device)

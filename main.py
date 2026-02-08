@@ -63,6 +63,14 @@ def backtest(symbol, agent_path):
     print("Backtest results saved to backtest_result.png")
 
 if __name__ == "__main__":
+    # Optimize CPU usage
+    if not torch.cuda.is_available():
+        import os
+        # Set threads to match physical cores for best performance in RL
+        num_threads = os.cpu_count() // 2 if os.cpu_count() > 4 else os.cpu_count()
+        torch.set_num_threads(num_threads)
+        print(f"CPU Optimization: Using {num_threads} threads.")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["train", "test"], default="train")
     parser.add_argument("--symbol", default="AAPL")
