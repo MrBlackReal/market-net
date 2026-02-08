@@ -53,7 +53,7 @@ def objective(trial):
             next_state, reward, done, truncated, _ = train_env.step(action)
             agent.remember(state, action, reward, next_state, done)
             state = next_state
-            if len(agent.memory) > batch_size:
+            if agent.mem_cnt > batch_size:
                 agent.replay(batch_size)
             if done: break
         agent.update_target_network()
