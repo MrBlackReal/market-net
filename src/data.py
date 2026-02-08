@@ -92,14 +92,14 @@ def fetch_data(symbol, start_date, end_date, source="yfinance", include_market=T
         return None
 
 def add_indicators(df):
-    """Add technical indicators and fractional differencing."""
+    """Add technical indicators and Quantum features from Zhang & Huang paper."""
     if df is None or df.empty:
         return None
         
     df = df.copy()
     df.columns = [c.capitalize() for c in df.columns]
     
-    # Standard Indicators
+    # --- Standard Indicators ---
     df['Sma_20'] = ta.trend.sma_indicator(df['Close'], window=20)
     df['Sma_50'] = ta.trend.sma_indicator(df['Close'], window=50)
     df['Ema_12'] = ta.trend.ema_indicator(df['Close'], window=12)
@@ -112,7 +112,24 @@ def add_indicators(df):
     df['Atr'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['Obv'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     
-    # Fractional Differencing (d=0.4 is common for price data)
+    # --- Quantum Features (Zhang & Huang) ---
+    # 1. Mass Proxy (Inertia): Inverse of rolling volatility. 
+    # High vol = low mass/inertia. Low vol = high mass/inertia.
+    vol = df['Close'].rolling(window=20).std()
+    df['Quantum_mass'] = 1.0 / (vol + 1e-9)
+    
+    # 2. Quantum Trend (T): m * d(price)/dt
+    # Using a 3-day difference for d(price)/dt
+    price_diff = df['Close'].diff(3)
+    df['Quantum_trend'] = df['Quantum_mass'] * price_diff
+    
+    # 3. Uncertainty Product: Delta_Price * Delta_Trend
+    # High value means market is undergoing "Evolution" (high information impact)
+    delta_p = df['Close'].rolling(window=10).std()
+    delta_t = df['Quantum_trend'].rolling(window=10).std()
+    df['Quantum_uncertainty'] = delta_p * delta_t
+    
+    # Fractional Differencing
     df['Frac_diff_close'] = fractional_diff(df['Close'].values, d=0.4)
     
     # Log Returns
@@ -129,7 +146,8 @@ def preprocess_data(df):
     features = [
         'Close', 'Volume', 'Sma_20', 'Sma_50', 'Ema_12', 'Ema_26', 
         'Rsi', 'Macd', 'Macd_signal', 'Bb_high', 'Bb_low', 'Atr', 'Obv', 
-        'Log_return', 'Frac_diff_close'
+        'Log_return', 'Frac_diff_close',
+        'Quantum_mass', 'Quantum_trend', 'Quantum_uncertainty'
     ]
     if 'Market_return' in df.columns:
         features.append('Market_return')
