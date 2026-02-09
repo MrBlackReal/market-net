@@ -5,6 +5,7 @@ import ta
 import numpy as np
 import requests
 import io
+import os
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime, timedelta
 from src.dataset import MarketDataset
