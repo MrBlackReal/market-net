@@ -32,14 +32,28 @@ def fetch_from_stooq(symbol, start, end):
     return df
 
 def fetch_from_binance(symbol, start, end):
-    """Fetch from Binance Public API (No login/key required)."""
+    """Fetch from Binance Public API with pagination."""
     exchange = ccxt.binance()
-    since = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', since=since)
-    df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    start_ts = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
+    end_ts = int(datetime.strptime(end, "%Y-%m-%d").timestamp() * 1000)
+    
+    all_ohlcv = []
+    current_ts = start_ts
+    
+    while current_ts < end_ts:
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', since=current_ts, limit=1000)
+        if not ohlcv:
+            break
+        all_ohlcv.extend(ohlcv)
+        # Move pointer to the last candle + 1 day (roughly)
+        current_ts = ohlcv[-1][0] + 86400000 
+        if len(ohlcv) < 1000: # No more data
+            break
+            
+    df = pd.DataFrame(all_ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
-    return df
+    return df[(df.index >= start) & (df.index <= end)]
 
 def fetch_data(symbol, start_date, end_date, source="yfinance", include_market=True):
     """

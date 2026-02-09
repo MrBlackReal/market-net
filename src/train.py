@@ -35,12 +35,14 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance", mo
         print(f"Fetching data for {symbol} ({start_date} to {end_date})...")
     
     full_df = fetch_data(symbol, start_date, end_date, source=source)
-    if full_df is None: return 0 if is_search else (None, None)
+    if full_df is None or len(full_df) < 100: 
+        return 0 if is_search else (None, None)
     full_df = add_indicators(full_df)
     
-    # Split into Train and Val sets
-    train_df = full_df[full_df.index < val_split_date]
-    val_df = full_df[full_df.index >= val_split_date]
+    # Split into Train and Val sets (80% Train, 20% Val)
+    split_idx = int(len(full_df) * 0.8)
+    train_df = full_df.iloc[:split_idx]
+    val_df = full_df.iloc[split_idx:]
     
     train_scaled, features, scaler = preprocess_data(train_df)
     val_scaled = scaler.transform(val_df[features].values)
