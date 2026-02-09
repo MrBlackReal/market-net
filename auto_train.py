@@ -33,7 +33,8 @@ def run_auto_pipeline(args):
 
     # 3. BACKTEST
     print(f"\n[PHASE 3] Running Final Backtest...")
-    model_path = f"model_{args.symbol}_best.pth"
+    safe_symbol = args.symbol.replace("/", "_").replace("^", "IDX_")
+    model_path = f"models/model_{safe_symbol}_best.pth"
     backtest(args.symbol, model_path, model_type=args.model_type, hidden_dim=best_params.get("hidden_dim", 128))
     print("\n🏁 AUTO-PIPELINE FINISHED.")
 

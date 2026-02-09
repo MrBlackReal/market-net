@@ -189,7 +189,8 @@ def export_processed_data(symbol, start_date, end_date, source="yfinance"):
     
     # Sanitize filename
     safe_symbol = symbol.replace("/", "_").replace("^", "IDX_")
-    filename = f"{safe_symbol}_processed_data.csv"
+    os.makedirs("exports", exist_ok=True)
+    filename = f"exports/{safe_symbol}_processed_data.csv"
     
     df.to_csv(filename)
     print(f"Successfully saved {len(df)} rows to {filename}")

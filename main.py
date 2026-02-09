@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--hidden_dim", type=int, default=128)
-    parser.add_argument("--model", default="model_AAPL_best.pth")
+    parser.add_argument("--model", default="models/model_AAPL_best.pth")
     
     args = parser.parse_args()
     

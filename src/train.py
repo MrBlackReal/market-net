@@ -126,7 +126,10 @@ def train_agent(symbol="AAPL", episodes=50, batch_size=32, source="yfinance", mo
             
             if val_worth > best_val_worth:
                 best_val_worth = val_worth
-                if not is_search: agent.save(f"model_{symbol}_best.pth")
+                if not is_search: 
+                    os.makedirs("models", exist_ok=True)
+                    safe_symbol = symbol.replace("/", "_").replace("^", "IDX_")
+                    agent.save(f"models/model_{safe_symbol}_best.pth")
                 no_improve_count = 0
             else:
                 no_improve_count += 1
