@@ -163,6 +163,24 @@ def preprocess_data(df):
     
     return scaled_data, features, scaler
 
+def export_processed_data(symbol, start_date, end_date, source="yfinance"):
+    """Fetch, process, and save the dataset to a single CSV for portability."""
+    print(f"Exporting processed data for {symbol}...")
+    df = fetch_data(symbol, start_date, end_date, source=source)
+    if df is None or df.empty:
+        print("No data found to export.")
+        return None
+        
+    df = add_indicators(df)
+    
+    # Sanitize filename
+    safe_symbol = symbol.replace("/", "_").replace("^", "IDX_")
+    filename = f"{safe_symbol}_processed_data.csv"
+    
+    df.to_csv(filename)
+    print(f"Successfully saved {len(df)} rows to {filename}")
+    return filename
+
 if __name__ == "__main__":
     # Test caching and partitioning
     test_symbol = "AAPL"

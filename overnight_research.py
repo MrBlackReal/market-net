@@ -1,22 +1,21 @@
 import os
 import torch
 import logging
+import multiprocessing
 from datetime import datetime
 from auto_train import run_auto_pipeline
 
-# 1. Define the assets you want to research overnight
-# Format: (Symbol, Source)
+# Assets to research
 ASSETS = [
-    ("AAPL", "yfinance"),    # Tech Stock
-    ("TSLA", "yfinance"),    # Volatile Stock
-    ("BTC/USDT", "binance"), # Crypto Leader
-    ("ETH/USDT", "binance"), # Altcoin Leader
-    ("^SPX", "stooq"),       # S&P 500 Index
-    ("NVDA", "yfinance"),    # High-Growth Tech
+    ("AAPL", "yfinance"),
+    ("TSLA", "yfinance"),
+    ("BTC/USDT", "binance"),
+    ("ETH/USDT", "binance"),
+    ("^SPX", "stooq"),
+    ("NVDA", "yfinance"),
 ]
 
 class Args:
-    """Helper to mimic CLI arguments for the auto_pipeline."""
     def __init__(self, symbol, source, model_type="pc", trials=40, episodes=300):
         self.symbol = symbol
         self.source = source
@@ -24,59 +23,68 @@ class Args:
         self.trials = trials
         self.episodes = episodes
 
+def worker_wrapper(asset_info, threads_per_worker):
+    symbol, source = asset_info
+    asset_start = datetime.now()
+    
+    # Lock this process to its assigned threads
+    torch.set_num_threads(threads_per_worker)
+    
+    try:
+        print(f"[WORKER] Exporting Data: {symbol}")
+        from src.data import export_processed_data
+        from datetime import datetime, timedelta
+        today = datetime(2026, 2, 8)
+        start_date = (today - timedelta(days=365*10)).strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+        export_processed_data(symbol, start_date, end_date, source=source)
+
+        print(f"[WORKER] Starting ML Pipeline: {symbol}")
+        args = Args(symbol, source, model_type="pc", trials=40, episodes=300)
+        run_auto_pipeline(args)
+        
+        duration = datetime.now() - asset_start
+        return f"SUCCESS: {symbol} | Duration: {duration}"
+    except Exception as e:
+        return f"FAILED: {symbol} | Error: {str(e)}"
+
 def run_nightly_research():
     start_time = datetime.now()
     report_path = f"overnight_report_{start_time.strftime('%Y%m%d')}.txt"
     
-    # Setup Logging
-    logging.basicConfig(
-        filename=f"overnight_{start_time.strftime('%Y%m%d')}.log",
-        level=logging.INFO,
-        format='%(asctime)s - %(message)s'
-    )
+    # 1. Hardware Detection
+    cpu_cores = os.cpu_count() or 4
+    gpu_available = torch.cuda.is_available()
     
-    with open(report_path, "w") as f:
-        f.write(f"=== OVERNIGHT RESEARCH REPORT: {start_time.strftime('%Y-%m-%d')} ===\n\n")
+    if gpu_available:
+        num_workers = min(4, cpu_cores) 
+        threads_per_worker = max(1, cpu_cores // num_workers)
+        mode = f"GPU Acceleration (Workers: {num_workers})"
+    else:
+        num_workers = cpu_cores
+        threads_per_worker = 1
+        mode = f"CPU Parallel (Workers: {num_workers})"
 
     print(f"[*] Starting Overnight Research on {len(ASSETS)} assets...")
+    print(f"[*] Hardware Mode: {mode} | Threads/Worker: {threads_per_worker}")
     
-    for symbol, source in ASSETS:
-        asset_start = datetime.now()
-        print(f"\n>>> PROCESSING: {symbol} ({source})")
-        
-        try:
-            # Configure intensive research settings
-            args = Args(symbol, source, model_type="pc", trials=40, episodes=300)
-            
-            # Run the full pipeline
-            run_auto_pipeline(args)
-            
-            # Log Success
-            duration = datetime.now() - asset_start
-            msg = f"SUCCESS: {symbol} | Duration: {duration}"
-            logging.info(msg)
-            
-            with open(report_path, "a") as f:
-                f.write(f"{msg}\n")
-                
-        except Exception as e:
-            msg = f"FAILED: {symbol} | Error: {str(e)}"
-            print(f"[!] {msg}")
-            logging.error(msg)
-            with open(report_path, "a") as f:
-                f.write(f"{msg}\n")
+    with multiprocessing.Pool(processes=num_workers) as pool:
+        # Use a list of arguments for the pool map
+        task_args = [(asset, threads_per_worker) for asset in ASSETS]
+        results = pool.starmap(worker_wrapper, task_args)
 
     total_duration = datetime.now() - start_time
-    footer = f"\n=== RESEARCH FINISHED | Total Time: {total_duration} ==="
-    print(footer)
-    with open(report_path, "a") as f:
-        f.write(footer)
+    
+    with open(report_path, "w") as f:
+        f.write(f"=== OVERNIGHT RESEARCH REPORT: {start_time.strftime('%Y-%m-%d')} ===\n")
+        f.write(f"Total Duration: {total_duration}\n")
+        f.write(f"Mode: {mode}\n\n")
+        for res in results:
+            f.write(f"{res}\n")
+            print(res)
+
+    print(f"\n=== RESEARCH FINISHED | Total Time: {total_duration} ===")
 
 if __name__ == "__main__":
-    # Optimize CPU usage
-    if not torch.cuda.is_available():
-        import os
-        num_threads = os.cpu_count() // 2 if os.cpu_count() > 4 else os.cpu_count()
-        torch.set_num_threads(num_threads)
-        
+    multiprocessing.freeze_support()
     run_nightly_research()
