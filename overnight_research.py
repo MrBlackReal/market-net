@@ -1,9 +1,9 @@
 import os
 import torch
-import logging
 import multiprocessing
-from datetime import datetime
+from datetime import datetime, timedelta
 from auto_train import run_auto_pipeline
+from src.data import export_processed_data
 
 # Assets to research
 ASSETS = [
@@ -32,8 +32,6 @@ def worker_wrapper(asset_info, threads_per_worker):
     
     try:
         print(f"[WORKER] Exporting Data: {symbol}")
-        from src.data import export_processed_data
-        from datetime import datetime, timedelta
         today = datetime(2026, 2, 8)
         start_date = (today - timedelta(days=365*10)).strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
@@ -46,7 +44,9 @@ def worker_wrapper(asset_info, threads_per_worker):
         duration = datetime.now() - asset_start
         return f"SUCCESS: {symbol} | Duration: {duration}"
     except Exception as e:
-        return f"FAILED: {symbol} | Error: {str(e)}"
+        import traceback
+        error_msg = traceback.format_exc()
+        return f"FAILED: {symbol} | Error: {str(e)}\n{error_msg}"
 
 def run_nightly_research():
     start_time = datetime.now()
@@ -69,7 +69,6 @@ def run_nightly_research():
     print(f"[*] Hardware Mode: {mode} | Threads/Worker: {threads_per_worker}")
     
     with multiprocessing.Pool(processes=num_workers) as pool:
-        # Use a list of arguments for the pool map
         task_args = [(asset, threads_per_worker) for asset in ASSETS]
         results = pool.starmap(worker_wrapper, task_args)
 
