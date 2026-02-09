@@ -1,6 +1,7 @@
 venv/
 .venv/
 __pycache__/
+data_cache/
 runs/
 model_*.pth
 *.png

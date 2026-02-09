@@ -6,18 +6,21 @@ import numpy as np
 import requests
 import io
 from sklearn.preprocessing import StandardScaler
-from datetime import datetime
+from datetime import datetime, timedelta
+from src.dataset import MarketDataset
+
+# Global dataset manager
+cache = MarketDataset()
 
 def fetch_from_yfinance(symbol, start, end):
     """Fetch from Yahoo Finance (No login required)."""
     df = yf.download(symbol, start=start, end=end, progress=False)
-    if isinstance(df.columns, pd.MultiIndex):
+    if df is not None and isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
 
 def fetch_from_stooq(symbol, start, end):
-    """Fetch from Stooq manually (No login required, no broken lib)."""
-    # symbol example: AAPL.US, ^SPX
+    """Fetch from Stooq manually (No login required)."""
     url = f"https://stooq.com/q/d/l/?s={symbol}&f=sd2ohlcv&h&k1=off"
     response = requests.get(url)
     if response.status_code != 200:
@@ -25,23 +28,59 @@ def fetch_from_stooq(symbol, start, end):
     df = pd.read_csv(io.StringIO(response.text))
     df['Date'] = pd.to_datetime(df['Date'])
     df.set_index('Date', inplace=True)
-    # Filter by date
     df = df[(df.index >= start) & (df.index <= end)]
     return df
 
 def fetch_from_binance(symbol, start, end):
     """Fetch from Binance Public API (No login/key required)."""
-    # symbol example: 'BTC/USDT'
     exchange = ccxt.binance()
     since = int(datetime.strptime(start, "%Y-%m-%d").timestamp() * 1000)
-    # Note: fetch_ohlcv has limits, this is a simplified version
     ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', since=since)
     df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
     df.set_index('Timestamp', inplace=True)
     return df
 
-from datetime import datetime, timedelta
+def fetch_data(symbol, start_date, end_date, source="yfinance", include_market=True):
+    """
+    Unified entry point for fetching data. Checks cache first.
+    """
+    # 1. Try loading from local batched cache
+    df = cache.load_full_range(symbol, start_date, end_date, source)
+    if df is not None:
+        print(f"Loaded {symbol} from local cache.")
+    else:
+        # 2. Fetch from internet if cache is missing
+        print(f"Fetching {symbol} from {source}...")
+        try:
+            if source == "yfinance":
+                df = fetch_from_yfinance(symbol, start_date, end_date)
+            elif source == "stooq":
+                df = fetch_from_stooq(symbol, start_date, end_date)
+            elif source == "binance":
+                df = fetch_from_binance(symbol, start_date, end_date)
+            
+            # Save new data to cache (partitioned by year)
+            if df is not None and not df.empty:
+                cache.save_batch(df, symbol, source)
+                
+        except Exception as e:
+            print(f"Error fetching data: {e}")
+            return None
+
+    # 3. Add Market Correlation
+    # Note: Market data (^GSPC) is typically sourced from yfinance or stooq.
+    # If using binance, we still fallback to yfinance for the index.
+    if include_market and symbol not in ["^GSPC", "^SPX"]:
+        market_source = "stooq" if source == "stooq" else "yfinance"
+        market_symbol = "^SPX" if market_source == "stooq" else "^GSPC"
+        
+        market_df = fetch_data(market_symbol, start_date, end_date, source=market_source, include_market=False)
+        if market_df is not None:
+            market_df = market_df[['Close']].rename(columns={'Close': 'Market_close'})
+            df = df.join(market_df, how='left').bfill().ffill()
+    
+    return df
 
 def fractional_diff(series, d, threshold=0.01):
     """
@@ -64,39 +103,13 @@ def fractional_diff(series, d, threshold=0.01):
     padding = np.full(len(series) - len(result), np.nan)
     return np.concatenate([padding, result])
 
-def fetch_data(symbol, start_date, end_date, source="yfinance", include_market=True):
-    """
-    Unified entry point for fetching data.
-    If include_market is True, it also fetches S&P 500 as a correlation feature.
-    """
-    print(f"Fetching {symbol} from {source}...")
-    try:
-        if source == "yfinance":
-            df = fetch_from_yfinance(symbol, start_date, end_date)
-        elif source == "stooq":
-            df = fetch_from_stooq(symbol, start_date, end_date)
-        elif source == "binance":
-            df = fetch_from_binance(symbol, start_date, end_date)
-        
-        if include_market and symbol != "^SPX":
-            print("Fetching S&P 500 for correlation...")
-            market_df = fetch_from_yfinance("^GSPC", start_date, end_date)
-            if market_df is not None:
-                # Rename market columns to avoid collision
-                market_df = market_df[['Close']].rename(columns={'Close': 'Market_Close'})
-                df = df.join(market_df, how='left').bfill().ffill()
-        
-        return df
-    except Exception as e:
-        print(f"Error fetching data: {e}")
-        return None
-
 def add_indicators(df):
     """Add technical indicators and Quantum features from Zhang & Huang paper."""
     if df is None or df.empty:
         return None
         
     df = df.copy()
+    # Standardize column names to Capitalized
     df.columns = [c.capitalize() for c in df.columns]
     
     # --- Standard Indicators ---
@@ -113,18 +126,10 @@ def add_indicators(df):
     df['Obv'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     
     # --- Quantum Features (Zhang & Huang) ---
-    # 1. Mass Proxy (Inertia): Inverse of rolling volatility. 
-    # High vol = low mass/inertia. Low vol = high mass/inertia.
     vol = df['Close'].rolling(window=20).std()
     df['Quantum_mass'] = 1.0 / (vol + 1e-9)
-    
-    # 2. Quantum Trend (T): m * d(price)/dt
-    # Using a 3-day difference for d(price)/dt
     price_diff = df['Close'].diff(3)
     df['Quantum_trend'] = df['Quantum_mass'] * price_diff
-    
-    # 3. Uncertainty Product: Delta_Price * Delta_Trend
-    # High value means market is undergoing "Evolution" (high information impact)
     delta_p = df['Close'].rolling(window=10).std()
     delta_t = df['Quantum_trend'].rolling(window=10).std()
     df['Quantum_uncertainty'] = delta_p * delta_t
@@ -159,15 +164,14 @@ def preprocess_data(df):
     return scaled_data, features, scaler
 
 if __name__ == "__main__":
-    # Test multiple sources
-    # 1. YFinance
-    d1 = fetch_data("AAPL", "2023-01-01", "2023-12-31", source="yfinance")
-    print(f"YFinance shape: {d1.shape if d1 is not None else 'Failed'}")
+    # Test caching and partitioning
+    test_symbol = "AAPL"
+    d1 = fetch_data(test_symbol, "2020-01-01", "2023-12-31", source="yfinance")
+    print(f"Loaded {test_symbol} shape: {d1.shape}")
     
-    # 2. Stooq
-    d2 = fetch_data("AAPL.US", "2023-01-01", "2023-12-31", source="stooq")
-    print(f"Stooq shape: {d2.shape if d2 is not None else 'Failed'}")
-    
-    # 3. Binance
-    d3 = fetch_data("BTC/USDT", "2023-01-01", "2023-12-31", source="binance")
-    print(f"Binance shape: {d3.shape if d3 is not None else 'Failed'}")
+    # Check if files were created
+    import os
+    safe_symbol = test_symbol.replace("/", "_").replace("^", "IDX_")
+    cache_path = os.path.join("data_cache", safe_symbol, "yfinance")
+    if os.path.exists(cache_path):
+        print(f"Cache files created in {cache_path}: {os.listdir(cache_path)}")

@@ -29,6 +29,9 @@ class TradingEnv(gym.Env):
             dtype=np.float32
         )
         
+        # Pre-allocate observation buffer to avoid expensive hstack in the loop
+        self.obs_buffer = np.zeros((lookback_window, scaled_data.shape[1] + 3), dtype=np.float32)
+        
         self.reset()
 
     def reset(self, seed=None, options=None):
@@ -42,20 +45,19 @@ class TradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self):
-        # Window of market data
-        window = self.scaled_data[self.current_step - self.lookback_window : self.current_step]
+        # Fast slice of market data
+        self.obs_buffer[:, :self.scaled_data.shape[1]] = self.scaled_data[self.current_step - self.lookback_window : self.current_step]
         
-        # Portfolio state (normalized roughly)
+        # Portfolio state (normalized)
         current_price = self.df['Close'].iloc[self.current_step]
-        portfolio_state = np.array([
-            [self.balance / self.initial_balance, 
-             self.shares_held * current_price / self.initial_balance,
-             current_price / self.df['Close'].iloc[0]]
-        ] * self.lookback_window) # Repeat for each step in window
+        balance_norm = self.balance / self.initial_balance
+        shares_norm = self.shares_held * current_price / self.initial_balance
+        price_norm = current_price / self.df['Close'].iloc[0]
         
-        # Concatenate market data and portfolio state
-        obs = np.hstack((window, portfolio_state))
-        return obs.astype(np.float32)
+        # Vectorized fill for portfolio state columns
+        self.obs_buffer[:, -3:] = [balance_norm, shares_norm, price_norm]
+        
+        return self.obs_buffer.copy()
 
     def step(self, action):
         current_price = self.df['Close'].iloc[self.current_step]

@@ -34,7 +34,7 @@ class QNetwork(nn.Module):
         return val + (adv - adv.mean(dim=1, keepdim=True))
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, memory_size=5000):
+    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, memory_size=5000, hidden_dim=128):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
@@ -56,8 +56,13 @@ class DQNAgent:
         self.done_mem = np.zeros(memory_size, dtype=np.bool_)
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = QNetwork(state_size, action_size).to(self.device)
-        self.target_model = QNetwork(state_size, action_size).to(self.device)
+        self.model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(self.device)
+        self.target_model = QNetwork(state_size, action_size, hidden_dim=hidden_dim).to(self.device)
+        
+        # Disable MKLDNN and torch.compile for stability on this CPU/Python 3.14 combo
+        torch.backends.mkldnn.enabled = False
+        print("Backend Optimization: MKLDNN and Compile disabled for stability.")
+
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.update_target_network()
 
@@ -78,9 +83,9 @@ class DQNAgent:
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
         
-        # Use inference_mode for CPU speed boost
         state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.inference_mode():
+            # Standard precision for stability
             action_values = self.model(state_t)
         return torch.argmax(action_values).item()
 
@@ -97,16 +102,18 @@ class DQNAgent:
         rewards = torch.from_numpy(self.reward_mem[batch_indices]).unsqueeze(1).to(self.device)
         dones = torch.from_numpy(self.done_mem[batch_indices]).unsqueeze(1).to(self.device).float()
         
+        # Standard precision training
         current_q = self.model(states).gather(1, actions)
         
-        # Double DQN: Use model to pick action, target_model to get Q-value
+        # Double DQN
         with torch.no_grad():
             next_actions = self.model(next_states).argmax(1).unsqueeze(1)
             next_q = self.target_model(next_states).gather(1, next_actions)
             target_q = rewards + (self.gamma * next_q * (1 - dones))
         
         loss = F.mse_loss(current_q, target_q)
-        self.optimizer.zero_grad()
+        
+        self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self.optimizer.step()
         

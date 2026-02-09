@@ -44,7 +44,7 @@ class QNetworkPC(nn.Module):
 
 class DQNAgentPC:
     """Predictive Coding Hybrid Agent."""
-    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, memory_size=5000):
+    def __init__(self, state_size, action_size, lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995, memory_size=5000, hidden_dim=128):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
@@ -66,8 +66,13 @@ class DQNAgentPC:
         self.done_mem = np.zeros(memory_size, dtype=np.bool_)
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = QNetworkPC(state_size, action_size).to(self.device)
-        self.target_model = QNetworkPC(state_size, action_size).to(self.device)
+        self.model = QNetworkPC(state_size, action_size, hidden_dim=hidden_dim).to(self.device)
+        self.target_model = QNetworkPC(state_size, action_size, hidden_dim=hidden_dim).to(self.device)
+
+        # Disable MKLDNN and torch.compile for stability on this CPU/Python 3.14 combo
+        torch.backends.mkldnn.enabled = False
+        print("Backend Optimization: MKLDNN and Compile disabled for stability.")
+
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.update_target_network()
 
@@ -90,6 +95,7 @@ class DQNAgentPC:
         
         state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.inference_mode():
+            # Standard precision for stability
             q_values, _ = self.model(state_t)
         return torch.argmax(q_values).item()
 
@@ -105,6 +111,7 @@ class DQNAgentPC:
         rewards = torch.from_numpy(self.reward_mem[batch_indices]).unsqueeze(1).to(self.device)
         dones = torch.from_numpy(self.done_mem[batch_indices]).unsqueeze(1).to(self.device).float()
         
+        # Standard precision training
         # 1. DQN Loss
         current_q, pred_state = self.model(states)
         current_q = current_q.gather(1, actions)
@@ -118,15 +125,13 @@ class DQNAgentPC:
         
         dqn_loss = F.mse_loss(current_q, expected_q)
         
-        # 2. Predictive Loss (Internal Model of Market Physics)
-        # Target is the LAST step of the next state sequence
+        # 2. Predictive Loss
         true_next_step = next_states[:, -1, :] 
         pred_loss = F.mse_loss(pred_state, true_next_step)
         
-        # 3. Total Loss: Combined reward maximization and surprise minimization
         total_loss = dqn_loss + (self.pred_alpha * pred_loss)
         
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         total_loss.backward()
         self.optimizer.step()
         
