@@ -9,3 +9,4 @@ scikit-learn
 optuna
 ccxt
 tensorboard
+requests

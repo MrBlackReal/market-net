@@ -8,7 +8,7 @@ A professional-grade Deep Reinforcement Learning (DRL) research platform that tr
 - **Predictive Coding (PC) Hybrid:** Implements a generative predictive head alongside the DQN. The agent learns to minimize "Market Surprise" (prediction error), allowing it to detect regime changes and anomalies faster than standard models.
 - **Dueling Double DQN (D3QN):** Splitting State Value and Action Advantage to prevent Q-value overestimation.
 - **LSTM Backbone:** Captures long-term temporal dependencies in market data.
-- **Optuna Integration:** Built-in Bayesian optimization to find the best `lr`, `gamma`, and architecture-specific parameters.
+- **Optuna Integration:** Built-in Bayesian optimization to find the best `lr`, `gamma`, `hidden_dim`, `batch_size`, `epsilon_decay`, and `pred_alpha`.
 
 ### ⚛️ Quantum & Physics Features
 - **Quantum Market Model:** Derived from **Zhang & Huang (2010)**, treating price as a wave function:
@@ -26,7 +26,7 @@ A professional-grade Deep Reinforcement Learning (DRL) research platform that tr
 ### ⚖️ Realistic Environment
 - **Transaction Fees:** 0.1% fee per trade.
 - **Slippage Simulation:** 0.05% price slippage.
-- **Risk-Adjusted Rewards:** Reward function penalizes drawdowns to encourage capital preservation.
+- **Loss-Averse Rewards:** Negative step rewards are amplified by 1.2× to discourage capital erosion.
 
 ## 🛠 Setup
 
@@ -39,7 +39,7 @@ A professional-grade Deep Reinforcement Learning (DRL) research platform that tr
 2. **Install Dependencies:**
    ```bash
    pip install -r requirements.txt
-   pip install ccxt ta requests tensorboard optuna
+   pip install requests
    ```
 
 ## 📈 Usage
@@ -50,29 +50,43 @@ Find the best settings for a specific asset and architecture:
 python optuna_search.py --symbol AAPL --source yfinance --model_type pc --trials 30
 ```
 
-### 2. Training
+### 2. Auto-Pipeline (Recommended)
+Runs Optuna search → full training → backtest in one shot:
+```bash
+python auto_train.py --symbol AAPL --source yfinance --model_type pc --trials 30 --episodes 200
+```
+
+### 3. Training
 ```bash
 # Train using the Predictive Coding Agent on Bitcoin from Binance
 python main.py --mode train --symbol "BTC/USDT" --source binance --model_type pc --episodes 100
 ```
 
-### 3. Monitoring
-Track Reward, DQN Loss, and **Predictive Surprise (PredLoss)**:
+Data sources: `yfinance`, `binance`, `stooq`.
+
+### 4. Monitoring
+Track Reward, NetWorth, DQN Loss, Epsilon, and **Predictive Surprise (PredLoss)**:
 ```bash
 tensorboard --logdir runs
 ```
 
-### 4. Backtesting
+### 5. Backtesting
 ```bash
-python main.py --mode test --symbol AAPL --model_type pc --model model_AAPL_best.pth
+python main.py --mode test --symbol AAPL --model_type pc --model models/model_AAPL_best.pth
+```
+
+### 6. Export Processed Data
+```bash
+python main.py --mode export --symbol AAPL --source yfinance
 ```
 
 ## 📊 Model Outputs
 
 | Name | Description |
 |------|-------------|
-| `model_*.pth` | Trained PyTorch weights for the agent. |
+| `models/model_*.pth` | Trained PyTorch weights for the agent. |
 | `backtest_*.png` | Visual comparison of Agent vs. Buy & Hold strategy. |
+| `exports/` | Processed CSV exports from `--mode export`. |
 | `runs/` | TensorBoard event files for real-time training analytics. |
 | `data_cache/` | Local batched storage of market data partitioned by year. |
 
@@ -84,8 +98,10 @@ python src/data.py
 ```
 
 ## 📂 Project Structure
-- `main.py`: CLI entry point for training and testing.
+- `main.py`: CLI entry point for training, testing, and data export.
+- `auto_train.py`: Full 3-phase pipeline — Optuna search → training → backtest.
 - `optuna_search.py`: Modular hyperparameter optimization.
+- `src/train.py`: Core training loop and backtest logic.
 - `src/data.py`: Feature engineering and unified data pipeline.
 - `src/dataset.py`: Batched caching and low-RAM dataset management.
 - `src/env.py`: Realistic trading environment.
