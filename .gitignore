@@ -8,3 +8,7 @@ exports/
 data_cache/
 model_*.pth
 *.png
+paper_portfolio.json
+paper_book.json
+paper_book_history.csv
+paper_bot.log

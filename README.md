@@ -1,110 +1,160 @@
-# Market-Net: Quantum-Enhanced RL Trading Agent
+# Market-Net
 
-A professional-grade Deep Reinforcement Learning (DRL) research platform that trains autonomous agents to trade assets using a blend of **Predictive Coding**, **Quantum Finance**, and **D3QN Architectures**.
+A research platform for systematic trading on equities and crypto. It contains
+two complementary approaches:
 
-## 🚀 Advanced Features
+1. **A reinforcement-learning agent** (Dueling Double-DQN with an LSTM, plus an
+   optional Predictive-Coding variant) that learns a buy/hold/sell policy.
+2. **Transparent rules-based strategies** (diversification + cross-sectional
+   momentum) that, in honest backtests, have a far more reliable edge than the
+   RL agent.
 
-### 🧠 Neural Architecture
-- **Predictive Coding (PC) Hybrid:** Implements a generative predictive head alongside the DQN. The agent learns to minimize "Market Surprise" (prediction error), allowing it to detect regime changes and anomalies faster than standard models.
-- **Dueling Double DQN (D3QN):** Splitting State Value and Action Advantage to prevent Q-value overestimation.
-- **LSTM Backbone:** Captures long-term temporal dependencies in market data.
-- **Optuna Integration:** Built-in Bayesian optimization to find the best `lr`, `gamma`, `hidden_dim`, `batch_size`, `epsilon_decay`, and `pred_alpha`.
+> **Reality check.** On out-of-sample data the RL agent trades at roughly chance
+> versus buy-and-hold. The systematic momentum/diversification strategy is the
+> one with a documented, validated edge. See **[Performance](#-honest-performance)**
+> before trusting any of these numbers. Nothing here is financial advice.
 
-### ⚛️ Quantum & Physics Features
-- **Quantum Market Model:** Derived from **Zhang & Huang (2010)**, treating price as a wave function:
-    - **Quantum Mass:** Proxy for market inertia.
-    - **Quantum Trend:** Momentum weighted by mass.
-    - **Quantum Uncertainty:** Product of price and trend volatility.
-- **Fractional Differencing:** Uses $d=0.4$ to make data stationary while preserving historical memory.
-- **Correlation Signals:** Integration of S&P 500 as a global market feature, automatically sourced from the primary data provider.
+---
 
-### 🗄️ Batched Data Caching
-- **Persistent Storage:** Automatically saves downloaded market data locally, partitioned by year and symbol.
-- **Low-RAM Friendly:** Designed to manage large datasets without loading everything into memory at once.
-- **Efficient Updates:** Only fetches missing data, reducing redundant downloads.
+## ⚡ Setup
 
-### ⚖️ Realistic Environment
-- **Transaction Fees:** 0.1% fee per trade.
-- **Slippage Simulation:** 0.05% price slippage.
-- **Loss-Averse Rewards:** Negative step rewards are amplified by 1.2× to discourage capital erosion.
+CPU-only; no GPU required (oneDNN/MKLDNN acceleration is enabled automatically).
 
-## 🛠 Setup
+```bash
+python3 -m venv venv
+source venv/bin/activate        # bash/zsh   (fish: source venv/bin/activate.fish)
+pip install -r requirements.txt
+```
 
-1. **Initialize Environment:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+All commands below assume the venv's Python (`./venv/bin/python` or an activated venv).
 
-2. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   pip install requests
-   ```
+---
 
 ## 📈 Usage
 
-### 1. Hyperparameter Optimization
-Find the best settings for a specific asset and architecture:
+### Systematic strategy (the part with a real edge)
+
 ```bash
-python optuna_search.py --symbol AAPL --source yfinance --model_type pc --trials 30
+# What to hold today: top momentum names, equal-weighted
+python main.py --mode allocate --capital 10000
+
+# Backtest momentum vs equal-weight vs S&P 500 (writes strategy_comparison.png)
+python main.py --mode strategy
 ```
 
-### 2. Auto-Pipeline (Recommended)
-Runs Optuna search → full training → backtest in one shot:
+### Reinforcement-learning agent
+
 ```bash
-python auto_train.py --symbol AAPL --source yfinance --model_type pc --trials 30 --episodes 200
+# Train on a basket (pass a comma list) and validate/test on one symbol.
+# (Programmatic: train_agent(symbol=[...], val_symbol="^GSPC"))
+python main.py --mode train --symbol "^GSPC" --episodes 100
+
+# Out-of-sample backtest: evaluates strictly AFTER the training cutoff,
+# using the scaler saved during training (no leakage).
+python main.py --mode test --symbol "^GSPC" --model models/model_IDX_GSPC_best.pth
+
+# Paper-trading signal (simulated book in paper_portfolio.json — no real orders)
+python main.py --mode signal --symbol "AAPL,MSFT,GOOGL" --model models/model_IDX_GSPC_best.pth
 ```
 
-### 3. Training
+### Hyperparameter search / full pipeline
+
 ```bash
-# Train using the Predictive Coding Agent on Bitcoin from Binance
-python main.py --mode train --symbol "BTC/USDT" --source binance --model_type pc --episodes 100
+python optuna_search.py --symbol AAPL --model_type pc --trials 30
+python auto_train.py    --symbol AAPL --model_type pc --trials 30 --episodes 200
 ```
 
-Data sources: `yfinance`, `binance`, `stooq`.
+### Other
 
-### 4. Monitoring
-Track Reward, NetWorth, DQN Loss, Epsilon, and **Predictive Surprise (PredLoss)**:
 ```bash
-tensorboard --logdir runs
+python main.py --mode export --symbol AAPL --source yfinance   # processed CSV -> exports/
+tensorboard --logdir runs                                      # training curves
 ```
 
-### 5. Backtesting
-```bash
-python main.py --mode test --symbol AAPL --model_type pc --model models/model_AAPL_best.pth
-```
+Data sources: `yfinance` (default), `stooq`, `binance`.
 
-### 6. Export Processed Data
-```bash
-python main.py --mode export --symbol AAPL --source yfinance
-```
+---
 
-## 📊 Model Outputs
+## 🧠 How it works
 
-| Name | Description |
-|------|-------------|
-| `models/model_*.pth` | Trained PyTorch weights for the agent. |
-| `backtest_*.png` | Visual comparison of Agent vs. Buy & Hold strategy. |
-| `exports/` | Processed CSV exports from `--mode export`. |
-| `runs/` | TensorBoard event files for real-time training analytics. |
-| `data_cache/` | Local batched storage of market data partitioned by year. |
+### RL agent
+- **Dueling Double-DQN (D3QN)** with an **LSTM** backbone over a 30-day window.
+- **Predictive-Coding variant** (`--model_type pc`): adds a generative head that
+  also minimizes market "surprise" (prediction error).
+- **Differential Sharpe ratio reward** — optimizes risk-adjusted return online,
+  not just raw P&L.
+- **Stationary, scale-invariant features** so 2016 and 2026 (and AAPL vs an
+  index) look statistically comparable — see below.
+- **Multi-symbol, random-window training** to discourage memorizing one path.
 
-## 🧪 Testing
-The project follows modular design patterns. You can run verification scripts or add unit tests for indicators:
-```bash
-# Verify data pipeline and caching
-python src/data.py
-```
+### Features (`src/data.py: get_feature_list`)
+14 stationary features: log returns, RSI, MACD histogram (price-relative), price
+vs SMA/EMA ratios, Bollinger position, ATR/price, relative volume, OBV z-score,
+fractional differencing of **log** price, and three return-based "quantum"
+features (mass/trend/uncertainty, after Zhang & Huang 2010). All scaled and
+clipped to ±5σ. **No raw price levels** are fed to the model (that was the main
+cause of poor generalization).
 
-## 📂 Project Structure
-- `main.py`: CLI entry point for training, testing, and data export.
-- `auto_train.py`: Full 3-phase pipeline — Optuna search → training → backtest.
-- `optuna_search.py`: Modular hyperparameter optimization.
-- `src/train.py`: Core training loop and backtest logic.
-- `src/data.py`: Feature engineering and unified data pipeline.
-- `src/dataset.py`: Batched caching and low-RAM dataset management.
-- `src/env.py`: Realistic trading environment.
-- `src/model_pc.py`: Predictive Coding Hybrid Agent.
-- `src/model.py`: Standard D3QN Agent.
-- `paper.txt`: Theoretical context on Predictive Coding.
+### Environment (`src/env.py`)
+- Actions: Hold / Buy (all-in) / Sell (all-out). Fees 0.1%, slippage 0.05%.
+- Stationary portfolio state: cash fraction, position fraction, unrealized P&L.
+- Random-window episodes via `reset(start_step=..., episode_length=...)`.
+
+### Systematic strategies (`src/strategy.py`)
+- **Diversification**: equal-weighting a basket roughly doubles the index's
+  risk-adjusted return (Sharpe ~1.1 vs ~0.7).
+- **Cross-sectional momentum**: monthly-rebalanced equal weight on the top-N
+  positive 6-month performers (Jegadeesh & Titman).
+
+---
+
+## 🗄️ Data caching
+Market data is cached under `data_cache/<symbol>/<source>/<year>.csv`. The cache
+auto-refreshes when it doesn't reach within ~5 days of the requested end date, so
+the perpetually-incomplete current year stays up to date.
+
+---
+
+## 📊 Honest performance
+
+Out-of-sample (Feb–Jun 2026, 19 symbols), the RL agent beat buy-and-hold **53%**
+of the time — essentially a coin flip — though it tends to reduce drawdowns.
+
+Systematic strategies, 2014–2026 ($10k start, momentum net of costs):
+
+| Strategy | CAGR | Sharpe | Max DD | Grew to |
+|---|---:|---:|---:|---:|
+| S&P 500 buy & hold | 11.8% | 0.73 | −34% | $40k |
+| Equal-weight basket | 20.0% | 1.14 | −32% | $97k |
+| Momentum top-5 | 24.5% | 1.10 | −33% | $153k |
+
+**Caveats that matter:**
+- The default universe is hand-picked survivors → **survivorship bias** inflates
+  absolute returns. The *relative* ranking (momentum > equal-weight > index > RL)
+  is the trustworthy signal.
+- Momentum has periodic crashes (it was flat 2018–2021 here).
+- Past performance ≠ future returns. **Paper-trade before risking capital.**
+
+---
+
+## 📂 Project structure
+
+| Path | Purpose |
+|---|---|
+| `main.py` | CLI entry point (`train`, `test`, `export`, `signal`, `allocate`, `strategy`) |
+| `src/strategy.py` | Momentum/diversification strategy: backtest + live allocation |
+| `src/live.py` | Paper-trading bot (simulated book in `paper_portfolio.json`) |
+| `src/train.py` | RL training loop + leakage-free out-of-sample backtest |
+| `src/model.py` | Standard D3QN agent |
+| `src/model_pc.py` | Predictive-Coding hybrid agent |
+| `src/env.py` | Trading environment (DSR reward, random windows) |
+| `src/data.py` | Data fetching + stationary feature engineering |
+| `src/dataset.py` | Year/symbol-partitioned cache with staleness refresh |
+| `optuna_search.py` / `auto_train.py` | Hyperparameter search / full pipeline |
+| `1009.4843.pdf` | Zhang & Huang quantum-finance paper (feature inspiration) |
+
+### Outputs
+`models/model_*.pth` + `models/scaler_*.pkl` (paired) · `backtest_*.png` ·
+`strategy_comparison.png` · `exports/` · `runs/` · `data_cache/` ·
+`paper_portfolio.json`
+</content>

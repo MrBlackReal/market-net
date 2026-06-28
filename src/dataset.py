@@ -56,7 +56,18 @@ class MarketDataset:
         
         full_df = pd.concat(dfs).sort_index()
         # Filter exact dates
-        return full_df[(full_df.index >= start_date) & (full_df.index <= end_date)]
+        full_df = full_df[(full_df.index >= start_date) & (full_df.index <= end_date)]
+        if full_df.empty:
+            return None
+
+        # Staleness check: the most recent year on disk is perpetually incomplete
+        # (it keeps growing). If the cache doesn't reach close to the requested
+        # end_date, treat it as a miss so fetch_data re-downloads and merges the
+        # newer rows instead of silently returning a truncated range.
+        requested_end = pd.to_datetime(end_date)
+        if full_df.index.max() < requested_end - pd.Timedelta(days=5):
+            return None
+        return full_df
 
     def get_batches(self, symbol, source, batch_size_years=1):
         """Generator for low-RAM systems to process data in chunks."""

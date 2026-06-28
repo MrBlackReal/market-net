@@ -140,43 +140,65 @@ def add_indicators(df):
     df['Atr'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'])
     df['Obv'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
     
-    # --- Quantum Features (Zhang & Huang) ---
-    vol = df['Close'].rolling(window=20).std()
-    df['Quantum_mass'] = 1.0 / (vol + 1e-9)
-    price_diff = df['Close'].diff(3)
-    df['Quantum_trend'] = df['Quantum_mass'] * price_diff
-    delta_p = df['Close'].rolling(window=10).std()
+    # --- Stationary / scale-invariant transforms ---------------------------
+    # Absolute price levels (Close/SMA/EMA/Bollinger/MACD/Volume) are non-
+    # stationary: they trend across years and differ across symbols, so a
+    # scaler fit on the past maps recent values to extreme z-scores the model
+    # never trained on. We convert everything to ratios / relative measures so
+    # 2016 and 2026 (and AAPL vs the index) look statistically comparable.
+    eps = 1e-9
+    ret = df['Close'].pct_change()
+    df['Close_sma20_ratio'] = df['Close'] / (df['Sma_20'] + eps) - 1.0
+    df['Sma_ratio'] = df['Sma_20'] / (df['Sma_50'] + eps) - 1.0
+    df['Ema_ratio'] = df['Ema_12'] / (df['Ema_26'] + eps) - 1.0
+    df['Bb_position'] = (df['Close'] - df['Bb_low']) / (df['Bb_high'] - df['Bb_low'] + eps)
+    df['Macd_hist_rel'] = (df['Macd'] - df['Macd_signal']) / (df['Close'] + eps)
+    df['Atr_rel'] = df['Atr'] / (df['Close'] + eps)
+    df['Volume_rel'] = df['Volume'] / (df['Volume'].rolling(20).mean() + eps)
+    df['Obv_z'] = (df['Obv'] - df['Obv'].rolling(20).mean()) / (df['Obv'].rolling(20).std() + eps)
+
+    # --- Quantum Features (Zhang & Huang), made scale-invariant via returns ---
+    rvol = ret.rolling(window=20).std().clip(lower=1e-3)   # floor avoids 1/0 blow-up
+    df['Quantum_mass'] = 1.0 / rvol
+    ret3 = df['Close'].pct_change(3)
+    df['Quantum_trend'] = df['Quantum_mass'] * ret3
+    delta_p = ret.rolling(window=10).std()
     delta_t = df['Quantum_trend'].rolling(window=10).std()
     df['Quantum_uncertainty'] = delta_p * delta_t
-    
-    # Fractional Differencing
-    df['Frac_diff_close'] = fractional_diff(df['Close'].values, d=0.4)
-    
-    # Log Returns
-    df['Log_return'] = np.log(df['Close'] / df['Close'].shift(1))
-    
-    if 'Market_close' in df.columns:
-        df['Market_return'] = np.log(df['Market_close'] / df['Market_close'].shift(1))
-    
+
+    # Fractional Differencing on LOG price (linear in price -> log makes it
+    # scale-invariant, unlike differencing the raw price).
+    df['Frac_diff_close'] = fractional_diff(np.log(df['Close'].values), d=0.4)
+
+    # Log Returns  (log1p(pct_change) == log(C_t / C_{t-1}))
+    df['Log_return'] = np.log1p(ret)
+
     df = df.bfill().ffill()
     return df
 
-def preprocess_data(df):
-    """Normalize indicators for neural network input."""
-    features = [
-        'Close', 'Volume', 'Sma_20', 'Sma_50', 'Ema_12', 'Ema_26', 
-        'Rsi', 'Macd', 'Macd_signal', 'Bb_high', 'Bb_low', 'Atr', 'Obv', 
-        'Log_return', 'Frac_diff_close',
-        'Quantum_mass', 'Quantum_trend', 'Quantum_uncertainty'
+def get_feature_list(df):
+    """Canonical (stationary) feature order used for model input.
+
+    Fixed across symbols so one model/scaler works on any ticker. Deliberately
+    excludes raw price-level columns and market-context to keep the feature
+    count identical for indices and single stocks.
+    """
+    return [
+        'Log_return', 'Rsi', 'Macd_hist_rel',
+        'Close_sma20_ratio', 'Sma_ratio', 'Ema_ratio', 'Bb_position',
+        'Atr_rel', 'Volume_rel', 'Obv_z', 'Frac_diff_close',
+        'Quantum_mass', 'Quantum_trend', 'Quantum_uncertainty',
     ]
-    if 'Market_return' in df.columns:
-        features.append('Market_return')
-    
-    data_to_scale = df[features].values
-    scaler = StandardScaler()
-    scaled_data = scaler.fit_transform(data_to_scale)
-    
-    return scaled_data, features, scaler
+
+def scale_features(scaler, X, clip=5.0):
+    """Apply a fitted scaler and clip to +/-`clip` std to tame heavy tails."""
+    return np.clip(scaler.transform(X), -clip, clip).astype(np.float32)
+
+def preprocess_data(df):
+    """Fit a scaler on this (training) data and normalize it for NN input."""
+    features = get_feature_list(df)
+    scaler = StandardScaler().fit(df[features].values)
+    return scale_features(scaler, df[features].values), features, scaler
 
 def export_processed_data(symbol, start_date, end_date, source="yfinance"):
     """Fetch, process, and save the dataset to a single CSV for portability."""
